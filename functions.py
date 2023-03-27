@@ -1,7 +1,8 @@
 import ROOT
 import numpy as np
 import h5py
-import sys, os
+import sys
+import os
 import km3flux
 import matplotlib.pyplot as plt
 import boost_histogram as bh
@@ -177,7 +178,7 @@ def compute_osc_weight(nu_type, energy, dir_z, is_cc, oscillation=True, nu_param
     # print(is_cc)
     cc_mask = (
         is_cc == 1
-    )  ######################## SOMETHING WRONG HERE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
+    )  # SOMETHING WRONG HERE!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
     # print(cc_mask)
     nc_mask = np.invert(cc_mask)
     # print(cc_mask)
