@@ -7,6 +7,7 @@ import km3flux
 import matplotlib.pyplot as plt
 import boost_histogram as bh
 import lnl
+from plot_functions import plothist, plothist2d
 
 
 OscProbDir = "/pbs/throng/km3net/software/oscprob/master-root_6.18.04"
@@ -276,13 +277,6 @@ def compute_evt_weight(
 
     return weight
 
-
-def plothist(h, ax):
-    return ax.bar(*h.axes.centers, h.values(), width=h.axes.widths[0], alpha=0.6)
-
-
-def plothist2d(h, ax):
-    return ax.pcolormesh(*h.axes.edges.T, h.values().T)
 
 
 def compute_chi2_map(E, dir_z, data, mc, Ebins=30, dir_zbins=20):
