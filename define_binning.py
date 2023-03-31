@@ -5,6 +5,49 @@ import matplotlib.pyplot as plt
 from scipy.interpolate import interp1d
 from plot_functions import *
 
+
+def cumulative_1d(hist: bh.Histogram, **kwargs):
+    """
+    Returns a function of the cumulative distribution of a variable based on the provided boost_histogram object.
+
+    Parameters
+    ----------
+    hist : boost_histogram.Histogram
+        A 1D histogram object from the boost_histogram library.
+
+    Returns
+    -------
+    cdf : callable
+        A function that takes a single numerical argument x and returns the cumulative distribution
+        of the variable based on the provided histogram object. If the histogram is 2D, the function
+        will calculate the marginal cumulative distribution along the x-axis.
+
+    Raises
+    ------
+    ValueError
+        If the input histogram is not 1D .
+
+    Example
+    -------
+    >>> import boost_histogram as bh
+    >>> import numpy as np
+    >>> hist = bh.Histogram(bh.axis.Regular(10, 0, 1))
+    >>> hist.fill(np.random.rand(1000))
+    >>> cdf_func = cumulative_1d(hist)
+    >>> cdf_func(0.5)
+    0.494
+    """
+    if hist.ndim not in [1]:
+        raise ValueError("Input histogram must be 1D.")
+    hcum = np.cumsum(hist.values())
+    hcum = hcum/np.amax(hcum)
+    hcum = np.insert(hcum, 0, 0.0)
+    fcum = interp1d(h.axes.edges[0], hcum, kind = "linear")
+    return cdf
+
+
+    
+
 def define_binning_function(fpath: str, is_pid: bool = False, pid: str = "low_track"):
     # Define the binning for the histograms in
     # Energy and cos theta
@@ -51,9 +94,7 @@ def define_binning_function(fpath: str, is_pid: bool = False, pid: str = "low_tr
     hcostheta.fill(-1.0*dir_z, weight=w)
     hE.fill(E, weight=w)
     h.fill(E, -1.0*dir_z, weight=w)
-    costhetacum = np.cumsum(hcostheta.values())
-    costhetacum = np.insert(costhetacum, 0, 0.0)
-    fcum = interp1d(hcostheta.axes.edges[0], costhetacum, kind = "linear")
+    fcum = cumulative_1d(hcostheta)
     Ecum = np.cumsum(hE.values())
     Ecum = np.insert(Ecum, 0, 0.0)
     fcumE = interp1d(hE.axes.edges[0], Ecum, kind = "linear")
@@ -63,8 +104,8 @@ def define_binning_function(fpath: str, is_pid: bool = False, pid: str = "low_tr
         bh.axis.Regular(20, 0, np.amax(costhetacum)+0.0001)
     )
     hnew = bh.Histogram(
-        #bh.axis.Regular(default_E, 1, 100, transform=bh.axis.transform.log)
-        bh.axis.Regular(default_E, 0, np.amax(Ecum)+0.0001),
+        bh.axis.Regular(default_E, 1, 100, transform=bh.axis.transform.log),
+        #bh.axis.Regular(default_E, 0, np.amax(Ecum)+0.0001),
         bh.axis.Regular(default_theta, 0, np.amax(costhetacum)+0.0001),
     )
     #hcostheta_flat.fill(fcum(-1.0*dir_z), weight=w2*E**(-2)/ngen[0])
@@ -72,17 +113,19 @@ def define_binning_function(fpath: str, is_pid: bool = False, pid: str = "low_tr
     #hnew.fill(fcum(-1.0*dir_z), E, weight = w)
     print(Ecum)
     print(fcumE(E))
-    hnew.fill(fcumE(E), fcum(-1.0*dir_z), weight = w)
+    #hnew.fill(fcumE(E), fcum(-1.0*dir_z), weight = w)
+    hnew.fill(E, fcum(-1.0*dir_z), weight = w)
     return h, hnew
 
 
 H, Hnew = define_binning_function("/home/spm/Documents/PhD/KM3NeT/local_work/chi2_tool/chi2_tool/SelectedEvents_mc_nu.root")
-mii = 1
+mii = None #1
 scale = 4
 fig, ax = plt.subplots(1,2,figsize = (scale*3,scale*1))
 im0 = plothist2d(H,ax=ax[0], vmin = mii)
 im1 = plothist2d(Hnew,ax=ax[1], vmin = mii)
 ax[0].set_xscale("log")
+ax[1].set_xscale("log")
 im0.cmap.set_under('white')
 im1.cmap.set_under('white')
 fig.colorbar(im0, ax = ax[0])
@@ -90,27 +133,34 @@ fig.colorbar(im1, ax = ax[1])
 ax[0].set_title("Original binning")
 ax[1].set_title("New binning")
 ax[0].set_xlabel(r"E [GeV]")
-ax[1].set_xlabel(r"CDF(E [GeV])")
+#ax[1].set_xlabel(r"CDF(E [GeV])")
+ax[1].set_xlabel(r"E [GeV]")
 ax[0].set_ylabel(r"cos ($\theta$)")
 ax[1].set_ylabel(r"CDF(cos ($\theta$))")
 plt.tight_layout()
 plt.show()
-for item in ["low_track", "low_shower", "high_track", "high_shower"]:
-    H, Hnew = define_binning_function("/home/spm/Documents/PhD/KM3NeT/local_work/chi2_tool/chi2_tool/SelectedEvents_mc_nu.root",is_pid=True, pid = item)
-    fig, ax = plt.subplots(1,2,figsize = (scale*3,scale*1))
-    im0 = plothist2d(H,ax=ax[0], vmin = mii)
-    im1 = plothist2d(Hnew,ax=ax[1], vmin = mii)
-    ax[0].set_xscale("log")
-    im0.cmap.set_under('white')
-    im1.cmap.set_under('white')
-    fig.colorbar(im0, ax = ax[0])
-    fig.colorbar(im1, ax = ax[1])
-    ax[0].set_title("Original binning")
-    ax[1].set_title("New binning")
-    ax[0].set_xlabel(r"E [GeV]")
-    ax[1].set_xlabel(r"CDF(E [GeV])")
-    ax[0].set_ylabel(r"cos ($\theta$)")
-    ax[1].set_ylabel(r"CDF(cos ($\theta$))")
-    fig.suptitle(item)
-    plt.tight_layout()
-    plt.show()
+fig, ax = plt.subplots()
+plothist(Hnew[:: bh.sum, :], ax = ax)
+plt.show()
+fig, ax = plt.subplots()
+plothist(Hnew[:, 0], ax = ax)
+plt.show()
+#for item in ["low_track", "low_shower", "high_track", "high_shower"]:
+#    H, Hnew = define_binning_function("/home/spm/Documents/PhD/KM3NeT/local_work/chi2_tool/chi2_tool/SelectedEvents_mc_nu.root",is_pid=True, pid = item)
+#    fig, ax = plt.subplots(1,2,figsize = (scale*3,scale*1))
+#    im0 = plothist2d(H,ax=ax[0], vmin = mii)
+#    im1 = plothist2d(Hnew,ax=ax[1], vmin = mii)
+#    ax[0].set_xscale("log")
+#    im0.cmap.set_under('white')
+#    im1.cmap.set_under('white')
+#    fig.colorbar(im0, ax = ax[0])
+#    fig.colorbar(im1, ax = ax[1])
+#    ax[0].set_title("Original binning")
+#    ax[1].set_title("New binning")
+#    ax[0].set_xlabel(r"E [GeV]")
+#    ax[1].set_xlabel(r"CDF(E [GeV])")
+#    ax[0].set_ylabel(r"cos ($\theta$)")
+#    ax[1].set_ylabel(r"CDF(cos ($\theta$))")
+#    fig.suptitle(item)
+#    plt.tight_layout()
+#    plt.show()
