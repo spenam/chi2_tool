@@ -36,3 +36,8 @@ doc/api
 
 # Virtual env
 venv
+
+# Images and h5 files
+*.h5
+*.png
+*.pdf
