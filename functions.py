@@ -1,13 +1,11 @@
 import ROOT
 import numpy as np
-import h5py
-import sys
-import os
 import km3flux
 import matplotlib.pyplot as plt
 import boost_histogram as bh
 import lnl
 from plot_functions import plothist, plothist2d
+from scipy.interpolate import interp1d
 
 
 OscProbDir = "/pbs/throng/km3net/software/oscprob/master-root_6.18.04"
@@ -122,6 +120,44 @@ def use_oscprob(flavour_in, flavour_out, energies, cos_zeniths, nu_params=None):
 
     return p
 
+def cumulative_1d(hist: bh.Histogram, **kwargs):
+    """
+    Returns a function of the cumulative distribution of a variable based on the provided boost_histogram object.
+
+    Parameters
+    ----------
+    hist : boost_histogram.Histogram
+        A 1D histogram object from the boost_histogram library.
+
+    Returns
+    -------
+    cdf : callable
+        A function that takes a single numerical argument x and returns the cumulative distribution
+        of the variable based on the provided histogram object. If the histogram is 2D, the function
+        will calculate the marginal cumulative distribution along the x-axis.
+
+    Raises
+    ------
+    ValueError
+        If the input histogram is not 1D .
+
+    Example
+    -------
+    >>> import boost_histogram as bh
+    >>> import numpy as np
+    >>> hist = bh.Histogram(bh.axis.Regular(10, 0, 1))
+    >>> hist.fill(np.random.rand(1000))
+    >>> cdf_func = cumulative_1d(hist)
+    >>> cdf_func(0.5)
+    0.494
+    """
+    if hist.ndim not in [1]:
+        raise ValueError("Input histogram must be 1D.")
+    hcum = np.cumsum(hist.values())
+    hcum = hcum/np.amax(hcum)
+    hcum = np.insert(hcum, 0, 0.0)
+    cdf = interp1d(hist.axes.edges[0], hcum, kind = "linear")
+    return cdf
 
 def compute_osc_weight(nu_type, energy, dir_z, is_cc, oscillation=True, nu_params=None):
     """
@@ -277,9 +313,51 @@ def compute_evt_weight(
 
     return weight
 
+def define_binning_function(E, dir_z, w, bin_theta: int = 20, bin_E: int = 30, lowlimE: int = 1, uplimE: int = 100):
+    # Define the binning for the histograms in
+    # Energy and cos theta
 
+    hcostheta = bh.Histogram(
+        bh.axis.Regular(bin_theta, -1, 0)
+    )
+    hcostheta.fill(-1.0*dir_z, weight=w)
+    fcum = cumulative_1d(hcostheta)
+    hcostheta_flat = bh.Histogram(
+        bh.axis.Regular(bin_theta, 0, 1)
+    )
+    hcostheta_flat.fill(fcum(-1.0*dir_z), weight=w)
+    thetac = fcum(-1*dir_z)
+    indices = np.argsort(thetac)
+    thetac = thetac[indices]
+    E = E[indices]
+    w = w[indices]
+    CDFs = []
+    thetaind = []
+    for i in range(bin_theta):
+        mid_ind = (thetac < hcostheta_flat.axes.edges[0][i+1]) & (thetac > hcostheta_flat.axes.edges[0][i])
+        Eis = E[mid_ind]
+        wis = w[mid_ind]
+        hmid = bh.Histogram(
+            bh.axis.Regular(bin_E, lowlimE, uplimE, transform=bh.axis.transform.log)
+        )
+        hmid.fill(Eis, weight=wis)
+        CDFs.append(cumulative_1d(hmid))
+        thetaind.append(mid_ind)
+    Ecs = []
+    for j,item in enumerate(thetaind):
+        Ec = CDFs[j](E[item])
+        Ecs.append(Ec)
+    Ecs = np.concatenate(Ecs,axis=None)
 
-def compute_chi2_map(E, dir_z, data, mc, Ebins=30, dir_zbins=20):
+    hnew = bh.Histogram(
+        bh.axis.Regular(bin_theta, 0, 1),
+        bh.axis.Regular(bin_theta, 0, 1)
+    )
+    hnew.fill(thetac, Ecs, weight=w)
+
+    return hnew
+
+def compute_chi2_map(E_data, dir_z_data, w_data, E_mc, dir_z_mc, w_mc, Ebins=30, dir_zbins=20, use_transform = False):
     """
     Computes the chi2 map from a 2d histogram of data and mc values
 
@@ -304,28 +382,37 @@ def compute_chi2_map(E, dir_z, data, mc, Ebins=30, dir_zbins=20):
     h : boost_histogram object
         Boost histogram object containing the 2d histogram of dir_z vs E filled with the corresponding Chi2 value for each bin.
     """
+    if use_transform is False:
 
-    hdata = bh.Histogram(
-        bh.axis.Regular(Ebins, 1, 100, transform=bh.axis.transform.log),
-        bh.axis.Regular(dir_zbins, -1, 0),
-    )
-    hmc = bh.Histogram(
-        bh.axis.Regular(Ebins, 1, 100, transform=bh.axis.transform.log),
-        bh.axis.Regular(dir_zbins, -1, 0),
-    )
-    hdata2 = bh.Histogram(
-        bh.axis.Regular(Ebins, 1, 100, transform=bh.axis.transform.log),
-        bh.axis.Regular(dir_zbins, -1, 0),
-    )
-    hmc2 = bh.Histogram(
-        bh.axis.Regular(Ebins, 1, 100, transform=bh.axis.transform.log),
-        bh.axis.Regular(dir_zbins, -1, 0),
-    )
-    hdata.fill(E, -1.0 * dir_z, weight=data)
-    hmc.fill(E, -1.0 * dir_z, weight=mc)
-    hdata2.fill(E, -1.0 * dir_z, weight=data**2)
-    hmc2.fill(E, -1.0 * dir_z, weight=mc**2)
-    s = np.sqrt(hmc2.values()) / hmc.values()
+        hdata = bh.Histogram(
+            bh.axis.Regular(Ebins, 1, 100, transform=bh.axis.transform.log),
+            bh.axis.Regular(dir_zbins, -1, 0),
+        )
+        hmc = bh.Histogram(
+            bh.axis.Regular(Ebins, 1, 100, transform=bh.axis.transform.log),
+            bh.axis.Regular(dir_zbins, -1, 0),
+        )
+        hdata2 = bh.Histogram(
+            bh.axis.Regular(Ebins, 1, 100, transform=bh.axis.transform.log),
+            bh.axis.Regular(dir_zbins, -1, 0),
+        )
+        hmc2 = bh.Histogram(
+            bh.axis.Regular(Ebins, 1, 100, transform=bh.axis.transform.log),
+            bh.axis.Regular(dir_zbins, -1, 0),
+        )
+        hdata.fill(E_data, -1.0 * dir_z_data, weight=w_data)
+        hmc.fill(E_mc, -1.0 * dir_z_mc, weight=w_mc)
+        hdata2.fill(E_data, -1.0 * dir_z_data, weight=w_data**2)
+        hmc2.fill(E_mc, -1.0 * dir_z_mc, weight=w_mc**2)
+        s = np.sqrt(hmc2.values()) / hmc.values()
+    
+    else:
+        hdata = define_binning_function(E_data, dir_z_data, w_data, bin_theta=dir_zbins, bin_E=Ebins, lowlimE=1, uplimE=100)
+        hmc = define_binning_function(E_mc, dir_z_mc, w_mc, bin_theta=dir_zbins, bin_E=Ebins, lowlimE=1, uplimE=100)
+        hdata2 = define_binning_function(E_data, dir_z_data, w_data**2, bin_theta=dir_zbins, bin_E=Ebins, lowlimE=1, uplimE=100)
+        hmc2 = define_binning_function(E_mc, dir_z_mc, w_mc**2, bin_theta=dir_zbins, bin_E=Ebins, lowlimE=1, uplimE=100)
+        s = np.sqrt(hmc2.values()) / hmc.values()
+
 
     # vectorize LnL function
     vLnL = np.vectorize(lnl.LnL)
